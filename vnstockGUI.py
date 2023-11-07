@@ -28,6 +28,7 @@ class VNStockApp(QWidget):
 
         self.text_browser = QTextBrowser()
         self.text_browser.setPlainText("In dữ liệu về các loại volume")
+        self.detailCalculator_textBrowser = QTextBrowser()
 
         layout = QHBoxLayout()
         layout.addWidget(self.line_edit)
@@ -39,6 +40,8 @@ class VNStockApp(QWidget):
         vertical_layout = QVBoxLayout()
         vertical_layout.addLayout(layout)
         vertical_layout.addWidget(self.text_browser)
+        vertical_layout.addWidget(self.detailCalculator_textBrowser)
+        self.detailCalculator_textBrowser.setFixedHeight(250)
 
         self.get_volume_btn.clicked.connect(self.check_line_edit)
         self.get_volume_btn.clicked.connect(self.get_volume)  # Connect to get_volume method
@@ -59,6 +62,16 @@ class VNStockApp(QWidget):
         time_selected = self.combo_box.currentText()
         self.stock_entered = self.line_edit.text().upper()
         stock_inday_df = stock_intraday_data(symbol=self.stock_entered, page_size=5000)
+
+        df = pd.DataFrame(stock_inday_df)
+
+        # Chuyển cột 'time' sang kiểu datetime
+        df['time'] = pd.to_datetime(df['time'], format='%H:%M:%S').dt.time
+
+        # Chia thành hai khoảng thời gian: buổi sáng và buổi chiều
+        morning_df = df[(df['time'] >= pd.to_datetime('09:15:00', format='%H:%M:%S').time()) & (df['time'] <= pd.to_datetime('11:30:00', format='%H:%M:%S').time())]
+        afternoon_df = df[(df['time'] >= pd.to_datetime('13:00:00', format='%H:%M:%S').time()) & (df['time'] <= pd.to_datetime('14:30:00', format='%H:%M:%S').time())]
+        self.detail_calculator(stock_inday_df, morning_df, afternoon_df)
 
         if time_selected == "1 Day":
             combine_dict = self.investor_vol_df(stock_inday_df)
@@ -167,6 +180,30 @@ class VNStockApp(QWidget):
 
             if file_path:
                 self.result_df.to_excel(file_path, index=False)
+
+    def detail_calculator(self, stock_inday_df, morning_df, afternoon_df):
+        result_text = ""
+        for time_df, time_period in zip([morning_df, afternoon_df], ["buổi sáng", "buổi chiều"]):
+            for investor_type in ["SHARK", "WOLF"]:
+                df_copy = time_df[time_df['investorType'] == investor_type].copy()
+                buy_df = df_copy[df_copy['orderType'] == 'Buy Up']
+                sell_df = df_copy[df_copy['orderType'] == 'Sell Down']
+
+                total_value_buy = (buy_df['volume'] * buy_df['averagePrice']).sum()
+                total_value_sell = (sell_df['volume'] * sell_df['averagePrice']).sum()
+                total_volume_buy = buy_df['volume'].sum()
+                total_volume_sell = sell_df['volume'].sum()
+
+                max_price_buy = total_value_buy / total_volume_buy if total_volume_buy > 0 else 0
+                max_price_sell = total_value_sell / total_volume_sell if total_volume_sell > 0 else 0
+
+                result_text += f"Trong {time_period}:\n"
+                result_text += f"{investor_type}\n"
+                result_text += f"Mua: {total_value_buy:.2e},\tBán: {total_value_sell:.2e}\n"
+                result_text += f"Giá mua tb: {max_price_buy:.2f},\tGiá bán tb: {max_price_sell:.2f}\n"
+                result_text += "________________________________________________________________________\n"
+
+                self.detailCalculator_textBrowser.setPlainText(result_text)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
